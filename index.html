@@ -36,6 +36,20 @@
             border-radius: 8px;
         }
 
+        /* ---------- CLICK GATE ---------- */
+        #gate {
+            position: fixed;
+            inset: 0;
+            z-index: 10000;
+            background: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            cursor: pointer;
+        }
+
         /* ---------- JUMP SCARE ---------- */
         #scare {
             display: none;
@@ -72,23 +86,11 @@
             0%, 100% { filter: none; }
             50%      { filter: invert(1) contrast(1.5); }
         }
-        
-        #gate {
-            position: fixed;
-            inset: 0;
-            z-index: 10000;
-            background: #000;
-            color: #fff;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 1.5rem;
-            cursor: pointer;
-        }
     </style>
 </head>
 <body>
     <div id="gate">Click to enter</div>
+
     <h1>ไอดำ</h1>
     <div class="img">
         <img src="854994058_2185994448985481_5094715257163195428_n.jpg">
@@ -101,63 +103,94 @@
     </div>
 
     <script>
-    const scare = document.getElementById('scare');
-    const gate = document.getElementById('gate');
-    const DELAY = 1500; // ms after clicking "enter"
-    let ctx;
+        const scare = document.getElementById('scare');
+        const gate = document.getElementById('gate');
+        const DELAY = 1500; // ms after clicking "enter"
 
-    function screamSound() {
-        const distortion = ctx.createWaveShaper();
-        const curve = new Float32Array(256);
-        for (let i = 0; i < 256; i++) {
-            const x = (i / 128) - 1;
-            curve[i] = Math.sign(x) * Math.pow(Math.abs(x), 0.2);
+        // Put a file named scream.mp3 next to this HTML file for a real sound.
+        // If the file is missing, a generated screech is used instead.
+        const scream = new Audio('scream.mp3');
+        scream.preload = 'auto';
+        scream.volume = 1;
+        let fileOk = true;
+        scream.addEventListener('error', () => { fileOk = false; });
+
+        let ctx; // fallback audio engine
+
+        function screamSound() {
+            if (!ctx) return;
+
+            const distortion = ctx.createWaveShaper();
+            const curve = new Float32Array(256);
+            for (let i = 0; i < 256; i++) {
+                const x = (i / 128) - 1;
+                curve[i] = Math.sign(x) * Math.pow(Math.abs(x), 0.2);
+            }
+            distortion.curve = curve;
+
+            const gain = ctx.createGain();
+            gain.gain.setValueAtTime(1, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 2);
+            distortion.connect(gain).connect(ctx.destination);
+
+            [880, 1320].forEach((freq, i) => {
+                const osc = ctx.createOscillator();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(freq * 1.6, ctx.currentTime + 0.5 + i * 0.2);
+                osc.connect(distortion);
+                osc.start();
+                osc.stop(ctx.currentTime + 2);
+            });
+
+            const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+            const noise = ctx.createBufferSource();
+            noise.buffer = buffer;
+            noise.connect(distortion);
+            noise.start();
         }
-        distortion.curve = curve;
 
-        const gain = ctx.createGain();
-        gain.gain.setValueAtTime(1, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 2);
-        distortion.connect(gain).connect(ctx.destination);
+        function playScareSound() {
+            if (fileOk) {
+                scream.currentTime = 0;
+                scream.play().catch(screamSound); // fall back if the file can't play
+            } else {
+                screamSound();
+            }
+        }
 
-        [880, 1320].forEach((freq, i) => {
-            const osc = ctx.createOscillator();
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(freq, ctx.currentTime);
-            osc.frequency.linearRampToValueAtTime(freq * 1.6, ctx.currentTime + 0.5 + i * 0.2);
-            osc.connect(distortion);
-            osc.start();
-            osc.stop(ctx.currentTime + 2);
+        function jumpScare() {
+            scare.style.display = 'flex';
+            playScareSound();
+            if (navigator.vibrate) navigator.vibrate([200, 50, 200, 50, 400]);
+        }
+
+        // The click on the gate is the user gesture that unlocks audio
+        gate.addEventListener('click', () => {
+            // unlock the generated-sound engine
+            ctx = new (window.AudioContext || window.webkitAudioContext)();
+            ctx.resume();
+
+            // unlock the audio file (play + pause once during the click)
+            scream.play()
+                .then(() => { scream.pause(); scream.currentTime = 0; })
+                .catch(() => {});
+
+            gate.style.display = 'none';
+            setTimeout(jumpScare, DELAY);
         });
 
-        const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-        const data = buffer.getChannelData(0);
-        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-        const noise = ctx.createBufferSource();
-        noise.buffer = buffer;
-        noise.connect(distortion);
-        noise.start();
-    }
-
-    function jumpScare() {
-        scare.style.display = 'flex';
-        screamSound();
-        if (navigator.vibrate) navigator.vibrate([200, 50, 200, 50, 400]);
-    }
-
-    // The click on the gate is the user gesture that unlocks audio
-    gate.addEventListener('click', () => {
-        ctx = new (window.AudioContext || window.webkitAudioContext)();
-        ctx.resume();
-        gate.style.display = 'none';
-        setTimeout(jumpScare, DELAY);
-    });
-
-    // Click the scare or press Esc to close it
-    scare.addEventListener('click', () => scare.style.display = 'none');
-    document.addEventListener('keydown', e => {
-        if (e.key === 'Escape') scare.style.display = 'none';
-    });
-</script>
+        // Click the scare or press Esc to close it
+        function closeScare() {
+            scare.style.display = 'none';
+            scream.pause();
+        }
+        scare.addEventListener('click', closeScare);
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') closeScare();
+        });
+    </script>
 </body>
 </html>
